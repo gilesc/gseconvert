@@ -13,19 +13,22 @@ our papers:
 First, download GSEs and GPL annotation data from NCBI's FTP servers,
 as well as GEO metadata by running:
 
-   `make download`
+    make download
 
 Alternatively if you've already downloaded some of these, you can symlink
-data/GSE or data/GPL to flat directories containing GSEs or GPLs,
+`data/GSE` or `data/GPL` to flat directories containing GSEs or GPLs,
 respectively (they can be gzipped).
 
-Now make the matrix of your choice by running: 
+Now make the matrix of your choice by running, e.g.: 
 
-    `make $SPECIES`
+    make SPECIES="Homo sapiens"
 
-where $SPECIES is "Homo sapiens", "Mus musculus", etc., surrounded by
-quotes. 
+being sure to surround the species of interest by quotes.
 
+## Caveats
+
+Because of certain shortcuts, this implementation is synchronous --
+you cannot make more than one matrix at a time.
 
 ## License
 
