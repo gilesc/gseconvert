@@ -1,10 +1,13 @@
 (ns gseconvert
   (:require
+   [clojure.contrib.math :as math]
    [clojure.contrib.io :as io]))
 
 (defn ensure-unzip [file]
-  ;;TODO: implement
-  file)
+  (if (.endsWith (str file) ".gz")
+    (java.util.zip.GZIPInputStream.
+     (java.io.FileInputStream. file))
+    file))
 
 (defn read-soft-section [file section]
   (take-while #(not (.startsWith % (str "!" section "_end")))
@@ -55,15 +58,25 @@ a map of probes to Entrez Gene IDs, if possible, otherwise nil."
   (/ (apply + coll)
      (count coll)))
 
-(defn scale [expression]
-  )
+(defn median [coll]
+  ((vec (sort coll))
+   (math/round (/ (count coll) 2))))
+
+
+(defn scale [expression-vec]
+  "Scale each experiment to 0-10000.
+   Floor 'extreme values': make the top 0.1% of values equal to the minimum of those top 0.1%. "
+  (let [max-value (nth (reverse (sort expression-vec))
+                           (math/ceil (/ (count expression-vec) 1000)))
+        min-value (apply min expression-vec)]
+        (map #(* 10000
+                 (/ (- % min-value)
+                    (max 1 (- max-value min-value))))
+             expression-vec)))
 
 (defn scale-and-validate [expression-vec]
   "Various postprocessing steps:
-   - Floor 'extreme values': make the top 0.1% of values equal to the minimum of those top 0.1%.
-
-   - Scale each experiment to 0-10000.
-  
+   - Scaling (see above).
    - Detect and fix experiments with logratio instead of raw expression values. (TODO)
 
    Also, validate each experiment according to criteria:
@@ -79,17 +92,13 @@ a map of probes to Entrez Gene IDs, if possible, otherwise nil."
              (>= e-median 0)
              (>= (/ e-mean e-median) 1.2)
              (/ (count (filter neg? expression-vec)) (count expression-vec)))
-      (let [max-value (nth (reverse (sort expression-vec))
-                           (math/ceil (/ (count expression-vec) 1000)))
-            min-value (apply min expression-vec)]
-        ;;;;;THIS IS WHERE I STOPPED FIX THIS SCALING
-        ))))
+      (scale expression-vec))))
 
 (defn read-expression [file gpl]
   (let [mapper (probes-to-entrez-ids gpl)
         lines (read-soft-section file "series_matrix_table")
         gsms (rest (.split (first lines) "\t"))
-        mtx ;;Take signature with highest average expression
+        mtx ;;Takes signature with highest average expression
         (into {}
          (for [[gene signatures]
                (group-by first
@@ -108,4 +117,12 @@ a map of probes to Entrez Gene IDs, if possible, otherwise nil."
                        (apply map vector (vals mtx))))]
     {:row-names gsms :col-names genes :expression mtx-t}))
 
-(defn into-global-expression-vector [expression])
+(require '[clojure.contrib.pprint :as pprint])
+
+(defn pprint-head [e]
+  (pprint/pprint (map #(take 5 %) (take 5 (:expression e)))))
+
+(defn into-global-expression-vector [genes expression]
+  (for [row (:expression expression)
+        :let [m (zipmap (:col-names expression) row)]]
+    (map #(m % "NA") genes)))
