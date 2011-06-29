@@ -9,6 +9,9 @@ download-gpl :
 	mkdir -p data/GPL
 	cd data/GPL && wget -nd -r ftp://ftp.ncbi.nih.gov/pub/geo/DATA/annotation/platforms/
 
+download-geometadb : 
+	cd data && wget http://gbnci.abcc.ncifcrf.gov/geo/GEOmetadb.sqlite.gz && gunzip GEOmetadb.sqlite.gz
+
 download-taxonomy : 
 	mkdir -p data/taxonomy
 	cd data/taxonomy && wget ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz && \
@@ -22,6 +25,6 @@ download-gene-info :
 	cd data && wget ftp://ftp.ncbi.nih.gov/gene/DATA/gene_info.gz && \
 		gunzip gene_info.gz
 
-download : download-gse download-gpl download-taxonomy download-gene-info
+download : download-gse download-gpl download-taxonomy download-gene-info download-geometadb
 
 

@@ -1,23 +1,11 @@
 (ns gseconvert
+  (:use
+   gseconvert.files
+   gseconvert.ids)
   (:require
    [clojure.contrib.math :as math]
    [clojure.contrib.io :as io]
-   [clojure.contrib.string :as string]
-   [clojure.contrib.shell-out :as shell]))
-
-(defn ensure-unzip [file]
-  (if (.endsWith (str file) ".gz")
-    (java.util.zip.GZIPInputStream.
-     (java.io.FileInputStream. file))
-    file))
-
-(defn read-soft-section [file section]
-  (take-while #(not (.startsWith % (str "!" section "_end")))
-              (rest
-               (drop-while
-                #(not (.startsWith % (str "!" section "_begin")))
-                (io/read-lines
-                 (ensure-unzip file))))))
+   [clojure.contrib.string :as string]))
 
 ;;Functions to read SOFT platform matrix and map probes to Entrez Gene IDs
 (defn default-mapper [m k]
@@ -28,25 +16,18 @@
                        (.split g "///"))))
                (m k))))
 
-(def make-mapper nil)
-(defmulti make-mapper
-  #(first
-   (filter identity
-           (map #{:ENTREZ_GENE_ID}
-                (keys %)))))
+(defn make-mapper [m]
+  (let [k (first
+           (filter identity
+                   (map #{:ENTREZ_GENE_ID (keyword "Gene ID")}
+                        (keys m))))]
+    (default-mapper m k)))
 
-(defmethod make-mapper :ENTREZ_GENE_ID [m]
-  (default-mapper m :ENTREZ_GENE_ID))
-
-(defn get-gpl-file [gpl]
-  (let [base (str "data/GPL/" gpl ".annot.gz")]
-    (first (filter #(.exists %)
-                   (map #(java.io.File. %) [(str base ".1") base])))))
 
 (defn probes-to-entrez-ids [gpl]
   "Read platform specification file (e.g. 'GPL96.txt'), and return
 a map of probes to Entrez Gene IDs, if possible, otherwise nil."
-  (if-let [file (get-gpl-file gpl)]
+  (if-let [file (read-gpl gpl)]
     (make-mapper
      (let [lines (read-soft-section file "platform_table")
            ks (.split (first lines) "\t")]
@@ -97,6 +78,10 @@ a map of probes to Entrez Gene IDs, if possible, otherwise nil."
              (/ (count (filter neg? expression-vec)) (count expression-vec)))
       (scale expression-vec))))
 
+(require '[clojure.contrib.pprint :as pprint])
+(defn pprint-head [e] ;;TODO: rm
+  (pprint/pprint (map #(take 5 %) (take 5 (:expression e)))))
+
 (defn read-expression [file gpl]
   (let [mapper (probes-to-entrez-ids gpl)
         lines (read-soft-section file "series_matrix_table")
@@ -117,33 +102,43 @@ a map of probes to Entrez Gene IDs, if possible, otherwise nil."
         genes (keys mtx)
         mtx-t (filter identity
                       (map scale-and-validate
-                       (apply map vector (vals mtx))))]
-    {:row-names gsms :col-names genes :expression mtx-t}))
+                           (apply map vector (vals mtx))))]
+    (if-not (empty? (first mtx-t))
+      {:row-names gsms :col-names genes :expression mtx-t})))
 
 (require '[clojure.contrib.pprint :as pprint])
 
-(defn pprint-head [e]
-  (pprint/pprint (map #(take 5 %) (take 5 (:expression e)))))
 
-(defn into-global-expression-vector [genes expression]
-  (for [row (:expression expression)
-        :let [m (zipmap (:col-names expression) row)]]
-    (map #(m % "NA") genes)))
+(defn to-global-expression-vectors [genes expression-mtx]
+  (prn (count (:expression expression-mtx)))
+  "Creates one column for every gene in the species and returns a Seq of ordered vectors."
+  (map #(cons %1 %2)
+       (:row-names expression-mtx)
+       (for [row (:expression expression-mtx)
+             :let [m (zipmap (:col-names expression-mtx) row)]]
+         (map #(m % "NA") genes))))
 
-(defn shell-exec [cmd]
-  (shell/sh "sh" "-c" cmd))
+(defn expression-matrix [gpl]
+  (let [genes (sort (convert-id [:gpl :gene] gpl))]
+    (cons
+     (concat ["-"] genes)
+     (for [gse (take 5 (convert-id [:gpl :gse] gpl))
+           row (to-global-expression-vectors genes
+                                                 (read-expression (read-gse gse gpl) gpl))]
+       row))))
 
-(defn get-tax-id [species]
-  (Integer/parseInt
-   (.trim
-    (shell-exec
-     (format "grep -P \"\t%s\t\" data/taxonomy.dat | cut -f1 | head -1" species)))))
+(defn write-tsv [file rows]
+  (io/write-lines file
+   (map #(string/join "\t" %)
+        rows)))
 
-(defn get-genes [tax-id]
-  (map #(Integer/parseInt %)
-       (string/split #"\n"
-        (shell-exec
-         (format "grep -P \"^%s\t\" data/gene_info | cut -f2" tax-id)))))
+(defn species-expression-matrix [species]
+  (apply concat
+         (map expression-matrix
+              (take 3
+                    (convert-id [:species :gpl] species)))))
 
 (defn -main [species]
-  (prn species))
+  (write-tsv (format "data/gse-%s.mtx"
+                     (.replaceAll (.toLowerCase species) " " "_"))
+             (species-expression-matrix species)))
