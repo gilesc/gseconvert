@@ -4,4 +4,4 @@ pom.xml
 /classes/
 .lein-deps-sum
 data/
-code_to_convert
+GEOmetadb.sqlite

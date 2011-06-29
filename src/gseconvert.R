@@ -1,35 +1,33 @@
 library(GEOquery)
-library(org.Hs.eg.db)
-library(org.Mm.eg.db)
-library(org.Ce.eg.db)
-library(org.EcK12.eg.db)
-library(org.Rn.eg.db)
 library(GEOmetadb)
 library(preprocessCore)
-library(impute)
+library(stringr)
+library(memoise)
 
-postprocess.matrix <- function(m, imputeMissing=TRUE) {
-  if (imputeMissing) {
-    m <- impute.knn(m)$data
-  }
+postprocess_matrix <- function(m) {
+  ## TODO: fix log experiments
+  ## TODO: apply criteria
+  ## 1. Mean and median >= 0
+  ## 2. Mean-median ratio >= 1.2
+  ## 3. <= 1% negative values
+  
   #As per Mikhail's paper:
   #floor the top 0.1% of genes (todo. do per experiment)
-  high.genes <- names(sort(rowMeans(m, na.rm=TRUE), decreasing=TRUE))
+  high.genes <- names(sort(colMeans(m, na.rm=TRUE), decreasing=TRUE))
   high.genes <- high.genes[1:ceiling(length(high.genes) * 0.001)]
-  m[high.genes,] <- apply(m[high.genes,], 2, min)
+  m[,high.genes] <- apply(m[,high.genes], 1, min)
   #scale to 10000 by experiment
-  m <- sweep(m, MARGIN=2, 10000.0 / apply(m, 2, function(col) max(col, na.rm=TRUE)), `*`)
-  #quantile normaliztion
-  axes <- dimnames(m)
-  m <- normalize.quantiles(m, copy=TRUE)
-  dimnames(m) <- axes
+  m <- t(apply(m,1, function(row) {
+    min.val <- min(row,na.rm=T)
+    max.val <- max(row,na.rm=T)
+    10000 * (row - min.val) / max(1, (max.val - min.val))
+  }))
   return(round(m))
 }
 
-
 geneCols <- c("ENTREZ_GENE_ID", "GeneID", "Entrez_Gene_ID", "GENE", "Gene")
 
-eSet2Matrix <- function(eSet, allGenes) {
+eset_to_matrix <- function(eSet, allGenes) {
   pd <- pData(featureData(eSet))
   col <- geneCols[geneCols %in% names(pd)][1]
   genes <- as.vector(pd[,col])
@@ -66,12 +64,13 @@ eSet2Matrix <- function(eSet, allGenes) {
   idxs <- match(colnames(m), allGenes)
   result[,idxs] <- m
   colnames(result) <- paste("LL:", colnames(result), sep="")
+
+  #postprocess
+  #result <- postprocess_matrix(result)
   return(result)
 }
 
-
-base_dir <- "data/GSE/"
-readGSE <- function(gseAcc, platform=NA) {
+read_gse<- function(gseAcc, platform=NA, base_dir="data/GSE/") {
   gse <- NA
   path <- ""
   if (!is.na(platform)) {
@@ -90,24 +89,32 @@ readGSE <- function(gseAcc, platform=NA) {
   return(gse)
 }
 
-result <- NA
+get_genes_for_species <- memoize(function(species) {
+  tax_id <- system(sprintf("grep -P \"\t%s\t\" data/taxonomy.dat | cut -f1", species), intern=T)[1]
+  system(sprintf("grep -P \"^%s\t\" data/gene_info | cut -f2", tax_id), intern=T)
+})
 
-writePlatformMatrix <- function(platform) {
-  outfile <- paste("/home/gilesc/Desktop/",platform, ".tsv", sep="")
-  genes <- getAllGenesForSpecies##TODOTODOTODOTODODOTODODODODODO
+append_platform_to_matrix_file <- function(species, platform) {
+  outfile <- sprintf("data/gse-%s.mtx",
+                     str_replace_all(species, " ", "_"))
+
+  genes <- get_genes_for_species(species)
   gselist <- geoConvert(platform, out_type="GSE")[[1]]$to_acc 
-  for (gseAcc in gselist) {
+  for (gseAcc in gselist[1:5]) {
     print(gseAcc)
-    gse <- readGSE(gseAcc,platform=platform)
+    gse <- read_gse(gseAcc,platform=platform)
     if (!is.na(gse)) {
       if (!is.list(gse)) {
-      gse <- list(gse)
+        gse <- list(gse)
       }
       for (eSet in gse) {
           if (annotation(eSet) == platform) {
             try({
-              m <- eSet2Matrix(eSet, genes)
-              write.table(m, file=outfile, col.names=!file.exists(outfile), append=TRUE, sep="\t")})
+              m <- eset_to_matrix(eSet, genes)
+              outfile
+                write.table(m, file=get_outfile(species),
+                            col.names=!file.exists(outfile), append=TRUE, sep="\t")
+            })
         }
       }
     }
@@ -115,7 +122,9 @@ writePlatformMatrix <- function(platform) {
   return(result)
 }
 
-writeMatrix <- function(species) {
+
+
+write_matrix <- function(species) {
   ##TODO:
 }
 
@@ -124,8 +133,6 @@ writeMatrix <- function(species) {
 ##accessions <- c("GPL1261", "GPL81", "GPL339", "GPL3667", "GPL8321", "GPL6885") #mouse
 ##accessions <- c("GPL200") #c elegans
 ##accessions <- c("GPL199", "GPL3154") #e. coli
-accessions <- c("GPL1355", "GPL85", "GPL341", "GPL4135", "GPL6101") #rat
-for (acc in accessions) {
-  writePlatformMatrix(acc) 
-}
+##accessions <- c("GPL1355", "GPL85", "GPL341", "GPL4135", "GPL6101") #rat
+
 
