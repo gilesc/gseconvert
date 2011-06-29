@@ -24,8 +24,12 @@ postprocess_matrix <- function(m) {
   ## 1. Mean and median >= 0
   ## 2. Mean-median ratio >= 1.2
   ## 3. <= 1% negative values
-
-  return(round(m))
+  qcrows <- apply(m,1,function(row) {
+    row.mean <- mean(row,na.rm=T)
+    row.median <- median(row,na.rm=T)
+    (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (sum(row<0) <= length(row) / 100)
+  })
+  return(round(m[qcrows,]))
 }
 
 geneCols <- c("ENTREZ_GENE_ID", "GeneID", "Entrez_Gene_ID", "GENE", "Gene")
@@ -84,10 +88,10 @@ read_gse<- function(gseAcc, platform=NA, base_dir="data/GSE/") {
   }
   if (file.exists(path)) {
     try(
-      gse <- getGEO(filename=path))
+      gse <- getGEO(filename=path, AnnotGPL=T))
   } else {
     try(
-      gse <- getGEO(gseAcc))
+      gse <- getGEO(gseAcc, AnnotGPL=T))
   }
   return(gse)
 }
@@ -106,8 +110,8 @@ append_platform_to_matrix_file <- function(species, platform) {
   outfile <- get_outfile(species)
 
   genes <- get_genes_for_species(species)
-  gselist <- geoConvert(platform, out_type="GSE")[[1]]$to_acc 
-  for (gseAcc in gselist[1:5]) {
+  gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="data/GEOmetadb.sqlite")[[1]]$to_acc 
+  for (gseAcc in gselist) {
     print(gseAcc)
     gse <- read_gse(gseAcc,platform=platform)
     if (!is.na(gse)) {
@@ -129,22 +133,25 @@ append_platform_to_matrix_file <- function(species, platform) {
 }
 
 get_platforms_for_species <- function(species) {
-  conn <- dbConnect(SQLite(), "GEOmetadb.sqlite")
-  sqliteQuickSQL(conn, paste
+  ##Currently restricts to one-color
+  conn <- dbConnect(SQLite(), "data/GEOmetadb.sqlite")
+  qry <- sprintf("SELECT gpl,count(gpl) as count FROM gsm
+ WHERE organism_ch1='%s'
+ AND channel_count=1
+ GROUP BY gpl
+ ORDER BY count(gpl) DESC", species)
+  sqliteQuickSQL(conn, qry)$gpl
 }
 
 write_matrix <- function(species) {
   file.remove(get_outfile(species))
-  append_platform_to_matrix_file(species, "GPL96")
+  for (platform in get_platforms_for_species(species)) {
+    print(platform)
+    append_platform_to_matrix_file(species, platform)
+  }
 }
 
 species <- commandArgs(trailingOnly=T)
 write_matrix(species)
-
-##accessions <- c("GPL96", "GPL570", "GPL97", "GPL571") #human
-##accessions <- c("GPL1261", "GPL81", "GPL339", "GPL3667", "GPL8321", "GPL6885") #mouse
-##accessions <- c("GPL200") #c elegans
-##accessions <- c("GPL199", "GPL3154") #e. coli
-##accessions <- c("GPL1355", "GPL85", "GPL341", "GPL4135", "GPL6101") #rat
 
 
