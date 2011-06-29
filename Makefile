@@ -1,6 +1,5 @@
 matrix : 
-	@grep -P "\t$(SPECIES)\t" data/taxonomy.dat | cut -f1 | head -1 | awk '{print "^" $$1"\t"}' > .tax_id
-	@grep -f .tax_id data/gene_info | cut -f2 > .genes #TODO: use tempfile #TODO: implement
+	lein run -m gseconvert "$(SPECIES)"
 
 download-gse :
 	mkdir -p data/GSE

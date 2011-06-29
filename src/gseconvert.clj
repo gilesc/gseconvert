@@ -1,7 +1,9 @@
 (ns gseconvert
   (:require
    [clojure.contrib.math :as math]
-   [clojure.contrib.io :as io]))
+   [clojure.contrib.io :as io]
+   [clojure.contrib.string :as string]
+   [clojure.contrib.shell-out :as shell]))
 
 (defn ensure-unzip [file]
   (if (.endsWith (str file) ".gz")
@@ -36,23 +38,24 @@
 (defmethod make-mapper :ENTREZ_GENE_ID [m]
   (default-mapper m :ENTREZ_GENE_ID))
 
-(defn probes-to-entrez-ids* [file]
+(defn get-gpl-file [gpl]
+  (let [base (str "data/GPL/" gpl ".annot.gz")]
+    (first (filter #(.exists %)
+                   (map #(java.io.File. %) [(str base ".1") base])))))
+
+(defn probes-to-entrez-ids [gpl]
   "Read platform specification file (e.g. 'GPL96.txt'), and return
 a map of probes to Entrez Gene IDs, if possible, otherwise nil."
-  (make-mapper
-   (let [lines (read-soft-section file "platform_table")
-         ks (.split (first lines) "\t")]
-     (zipmap (map keyword ks)
-             (apply map vector
-                    (map #(let [fields (.split % "\t")]
-                            (concat fields (repeat (- (count ks) (count fields)) nil)))
-                         (take-while #(not (.startsWith % "!platform_table_end"))
-                                     (rest lines))))))))
-(defn probes-to-entrez-ids [gpl]
-  ;;TODO: implement
-  (probes-to-entrez-ids*
-   "/home/gilesc/Desktop/GPL96.txt"))
-
+  (if-let [file (get-gpl-file gpl)]
+    (make-mapper
+     (let [lines (read-soft-section file "platform_table")
+           ks (.split (first lines) "\t")]
+       (zipmap (map keyword ks)
+               (apply map vector
+                      (map #(let [fields (.split % "\t")]
+                              (concat fields (repeat (- (count ks) (count fields)) nil)))
+                           (take-while #(not (.startsWith % "!platform_table_end"))
+                                       (rest lines)))))))))
 
 (defn mean [coll]
   (/ (apply + coll)
@@ -126,3 +129,21 @@ a map of probes to Entrez Gene IDs, if possible, otherwise nil."
   (for [row (:expression expression)
         :let [m (zipmap (:col-names expression) row)]]
     (map #(m % "NA") genes)))
+
+(defn shell-exec [cmd]
+  (shell/sh "sh" "-c" cmd))
+
+(defn get-tax-id [species]
+  (Integer/parseInt
+   (.trim
+    (shell-exec
+     (format "grep -P \"\t%s\t\" data/taxonomy.dat | cut -f1 | head -1" species)))))
+
+(defn get-genes [tax-id]
+  (map #(Integer/parseInt %)
+       (string/split #"\n"
+        (shell-exec
+         (format "grep -P \"^%s\t\" data/gene_info | cut -f2" tax-id)))))
+
+(defn -main [species]
+  (prn species))
