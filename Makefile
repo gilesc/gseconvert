@@ -21,6 +21,9 @@ download-gene-info :
 	cd data && wget ftp://ftp.ncbi.nih.gov/gene/DATA/gene_info.gz && \
 		gunzip gene_info.gz
 
-download : download-gse download-taxonomy download-gene-info download-geometadb
+download-R-deps :
+	Rscript src/installdeps.R
+
+download : download-gse download-taxonomy download-gene-info download-geometadb download-R-deps
 
 

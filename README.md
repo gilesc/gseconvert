@@ -8,15 +8,21 @@ our papers:
 
 *   [GAMMA: Global Microarray Meta-analysis](http://bioinformatics.oxfordjournals.org/content/early/2009/05/15/bioinformatics.btp290)
 
+## Requirements
+R language (tested on 2.13.0), including RScript, on your PATH
+GNU Make and GNU grep (needs to support -P option)
+~150 GB free disk space
+
 ## Usage
 
 First, download GSEs from NCBI's FTP servers,
-as well as GEO metadata by running:
+GEO and Entrez Gene metadata, and R package dependencies by running:
 
     make download
 
-Alternatively if you've already downloaded some of these, you can symlink
-`data/GSE` a flat directory containing GSEs, (they can be gzipped).
+Alternatively if you've already downloaded the GSEs, you can symlink
+`data/GSE` to a flat directory containing the GSEs and download the
+other dependencies individually (see the Makefile).
 
 Now make the matrix for the species of your choice by running, e.g.: 
 
