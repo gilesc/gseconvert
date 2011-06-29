@@ -1,5 +1,5 @@
 matrix : 
-	lein run -m gseconvert "$(SPECIES)"
+	Rscript src/gseconvert.R "$(SPECIES)"
 
 download-gse :
 	mkdir -p data/GSE

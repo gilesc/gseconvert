@@ -4,12 +4,10 @@ library(preprocessCore)
 library(stringr)
 library(memoise)
 
+options(warn=-1)
+
 postprocess_matrix <- function(m) {
   ## TODO: fix log experiments
-  ## TODO: apply criteria
-  ## 1. Mean and median >= 0
-  ## 2. Mean-median ratio >= 1.2
-  ## 3. <= 1% negative values
   
   #As per Mikhail's paper:
   #floor the top 0.1% of genes (todo. do per experiment)
@@ -22,6 +20,11 @@ postprocess_matrix <- function(m) {
     max.val <- max(row,na.rm=T)
     10000 * (row - min.val) / max(1, (max.val - min.val))
   }))
+  ## Quality control criteria:
+  ## 1. Mean and median >= 0
+  ## 2. Mean-median ratio >= 1.2
+  ## 3. <= 1% negative values
+
   return(round(m))
 }
 
@@ -66,7 +69,7 @@ eset_to_matrix <- function(eSet, allGenes) {
   colnames(result) <- paste("LL:", colnames(result), sep="")
 
   #postprocess
-  #result <- postprocess_matrix(result)
+  result <- postprocess_matrix(result)
   return(result)
 }
 
@@ -94,9 +97,13 @@ get_genes_for_species <- memoize(function(species) {
   system(sprintf("grep -P \"^%s\t\" data/gene_info | cut -f2", tax_id), intern=T)
 })
 
-append_platform_to_matrix_file <- function(species, platform) {
-  outfile <- sprintf("data/gse-%s.mtx",
+get_outfile <- function(species) {
+   sprintf("data/gse-%s.mtx",
                      str_replace_all(species, " ", "_"))
+}
+
+append_platform_to_matrix_file <- function(species, platform) {
+  outfile <- get_outfile(species)
 
   genes <- get_genes_for_species(species)
   gselist <- geoConvert(platform, out_type="GSE")[[1]]$to_acc 
@@ -112,22 +119,27 @@ append_platform_to_matrix_file <- function(species, platform) {
             try({
               m <- eset_to_matrix(eSet, genes)
               outfile
-                write.table(m, file=get_outfile(species),
+                write.table(m, file=outfile,
                             col.names=!file.exists(outfile), append=TRUE, sep="\t")
             })
         }
       }
     }
   }
-  return(result)
 }
 
-
+get_platforms_for_species <- function(species) {
+  conn <- dbConnect(SQLite(), "GEOmetadb.sqlite")
+  sqliteQuickSQL(conn, paste
+}
 
 write_matrix <- function(species) {
-  ##TODO:
+  file.remove(get_outfile(species))
+  append_platform_to_matrix_file(species, "GPL96")
 }
 
+species <- commandArgs(trailingOnly=T)
+write_matrix(species)
 
 ##accessions <- c("GPL96", "GPL570", "GPL97", "GPL571") #human
 ##accessions <- c("GPL1261", "GPL81", "GPL339", "GPL3667", "GPL8321", "GPL6885") #mouse
