@@ -8,6 +8,33 @@ library(plyr)
 options(warn=-1)
 
 N_ROWS_REJECTED_QC <- 0
+
+QNORM_COUNTS <- NULL
+QNORM_MEANS <- NULL
+update_quantile_normalization_vector <- function(m) {
+  if (is.null(QNORM_COUNTS)) {
+    QNORM_COUNTS <<- rep(0,ncol(m))
+    QNORM_MEANS <<- rep(-1,ncol(m))
+  }
+  for (i in 1:nrow(m)) {
+    v <- sort(m[i,]) ##Removes NAs also
+    range <- (ncol(m)-length(v)):length(v) ##Right side of the vector
+    print(paste(ncol(m)-length(v),":",length(v)))
+    QNORM_MEANS[range] <<- ((QNORM_MEANS[range] * QNORM_COUNTS[range]) + v) / (QNORM_COUNTS[range] + 1)
+    QNORM_COUNTS[range] <<- QNORM_COUNTS[range] + 1
+  }
+}
+
+quantile_normalize <- function(m,v) {
+  ##Where v is the quantile normalization mean vector (QNORM_MEANS)
+  t(apply(m,1,function(row) {
+    row <- sort(row,na.last=FALSE)
+    result <- v
+    names(result) <- names(row)
+    result[colnames(m)]
+  }))
+}
+
 postprocess_matrix <- function(m) {
   ## TODO: fix log experiments
   
@@ -30,9 +57,10 @@ postprocess_matrix <- function(m) {
     row <- row[!is.na(row)]
     row.mean <- mean(row)
     row.median <- median(row)
-    (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (sum(row<0) <= length(row) / 100) & !empty(row)
+    (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (sum(row<0) <= length(row) / 100) & (length(row) > 0)
   })
-  N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows)
+  N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows) ##TODO: fix "NA" rows rejected due to QC
+  print(qcrows)
   return(round(m[qcrows,]))
 }
 
@@ -82,7 +110,7 @@ eset_to_matrix <- function(eSet, allGenes) {
   colnames(result) <- paste("LL:", colnames(result), sep="")
 
   #postprocess
-  #result <- postprocess_matrix(result)
+  result <- postprocess_matrix(result)
 
   #Remove all rows that all purely NA
   result <- result[,apply(result,1,function(row) !all(is.na(row)))]
@@ -113,17 +141,19 @@ get_genes_for_species <- memoize(function(species) {
   system(sprintf("grep -P \"^%s\t\" data/gene_info | cut -f2", tax_id), intern=T)
 })
 
-get_outfile <- function(species) {
-   sprintf("data/gse-%s.mtx",
-                     str_replace_all(tolower(species), " ", "_"))
+get_outfile <- function(species,normalized=FALSE) {
+   sprintf("data/gse-%s%s.mtx",
+                     str_replace_all(tolower(species), " ", "_"),
+           ifelse(normalized, "-normalized", ""))
 }
 
+GSMS_USED <- c()
 append_platform_to_matrix_file <- function(species, platform) {
   outfile <- get_outfile(species)
 
   genes <- get_genes_for_species(species)
   gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="data/GEOmetadb.sqlite")[[1]]$to_acc 
-  for (gseAcc in gselist) {
+  for (gseAcc in gselist[1:20]) { ##TODO:
     print(gseAcc)
     gse <- read_gse(gseAcc,platform=platform)
     if (!is.na(gse)) {
@@ -134,7 +164,10 @@ append_platform_to_matrix_file <- function(species, platform) {
           if (annotation(eSet) == platform) {
             try({
               m <- eset_to_matrix(eSet, genes)
+              m <- m[setdiff(rownames(m),GSMS_USED),] ##Don't reuse GSMs
               if (!empty(m)) {
+                GSMS_USED <- c(GSMS_USED,rownames(m))
+                update_quantile_normalization_vector(m)
                 write.table(m, file=outfile,
                             col.names=!file.exists(outfile), append=TRUE, sep="\t")
               }
@@ -158,11 +191,17 @@ get_platforms_for_species <- function(species) {
 
 write_matrix <- function(species) {
   file.remove(get_outfile(species))
-  for (platform in get_platforms_for_species(species)) {
+  for (platform in get_platforms_for_species(species)[1]) { ##TODO:
+    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 10
     print(platform)
     append_platform_to_matrix_file(species, platform)
   }
+  m <- read.table(get_outfile(species),sep="\t")##TODO: read in chunks
+  write(QNORM_MEANS,"qnorm_means")
+  m <- quantile_normalize(m, QNORM_MEANS)
+  write.table(m, file=get_outfile(species,normalized=T), sep="\t")
 }
+
 
 species <- commandArgs(trailingOnly=T)
 write_matrix(species)

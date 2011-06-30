@@ -10,9 +10,9 @@ our papers:
 
 ## Requirements
 
-*  R language (tested on 2.13.0), including RScript, on your PATH
-*  GNU Make and GNU grep (needs to support -P option)
-*  ~150 GB free disk space
+* R language (tested on 2.13.0), including RScript, on your PATH
+* GNU Make and GNU grep (needs to support -P option)
+* ~150 GB free disk space
 
 ## Usage
 
@@ -27,7 +27,7 @@ other dependencies individually (see the Makefile).
 
 Now make the matrix for the species of your choice by running, e.g.: 
 
-    make matrix SPECIES="Homo sapiens"
+    make matrix SPECIES="Caenorhabditis elegans"
 
 being sure to surround the species of interest by quotes.
 
