@@ -3,9 +3,11 @@ library(GEOmetadb)
 library(preprocessCore)
 library(stringr)
 library(memoise)
+library(plyr)
 
 options(warn=-1)
 
+N_ROWS_REJECTED_QC <- 0
 postprocess_matrix <- function(m) {
   ## TODO: fix log experiments
   
@@ -25,10 +27,12 @@ postprocess_matrix <- function(m) {
   ## 2. Mean-median ratio >= 1.2
   ## 3. <= 1% negative values
   qcrows <- apply(m,1,function(row) {
-    row.mean <- mean(row,na.rm=T)
-    row.median <- median(row,na.rm=T)
-    (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (sum(row<0) <= length(row) / 100)
+    row <- row[!is.na(row)]
+    row.mean <- mean(row)
+    row.median <- median(row)
+    (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (sum(row<0) <= length(row) / 100) & !empty(row)
   })
+  N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows)
   return(round(m[qcrows,]))
 }
 
@@ -73,7 +77,10 @@ eset_to_matrix <- function(eSet, allGenes) {
   colnames(result) <- paste("LL:", colnames(result), sep="")
 
   #postprocess
-  result <- postprocess_matrix(result)
+  #result <- postprocess_matrix(result)
+
+  #Remove all rows that all purely NA
+  result <- result[,apply(result,1,function(row) !all(is.na(row)))]
   return(result)
 }
 
@@ -122,9 +129,10 @@ append_platform_to_matrix_file <- function(species, platform) {
           if (annotation(eSet) == platform) {
             try({
               m <- eset_to_matrix(eSet, genes)
-              outfile
+              if (!empty(m)) {
                 write.table(m, file=outfile,
                             col.names=!file.exists(outfile), append=TRUE, sep="\t")
+              }
             })
         }
       }
@@ -153,5 +161,5 @@ write_matrix <- function(species) {
 
 species <- commandArgs(trailingOnly=T)
 write_matrix(species)
-
-
+print("DONE!")
+print(paste(N_ROWS_REJECTED_QC, "rows were rejected due to failing QC."))

@@ -9,9 +9,10 @@ our papers:
 *   [GAMMA: Global Microarray Meta-analysis](http://bioinformatics.oxfordjournals.org/content/early/2009/05/15/bioinformatics.btp290)
 
 ## Requirements
-R language (tested on 2.13.0), including RScript, on your PATH
-GNU Make and GNU grep (needs to support -P option)
-~150 GB free disk space
+
+*  R language (tested on 2.13.0), including RScript, on your PATH
+*  GNU Make and GNU grep (needs to support -P option)
+*  ~150 GB free disk space
 
 ## Usage
 
