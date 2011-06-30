@@ -7,6 +7,29 @@ library(plyr)
 
 options(warn=-1)
 
+
+## Functions for mapping among IDs
+query_geometadb <- function(qry) {
+    conn <- dbConnect(SQLite(), "data/GEOmetadb.sqlite")
+    sqliteQuickSQL(conn, qry) #TODO close
+}
+
+get_species_for_platform <- function(platform) {
+  query_geometadb(sprintf("SELECT organism from gpl
+    WHERE gpl='%s' LIMIT 1", platform))$organism
+}
+
+get_platforms_for_species <- function(species) {
+  ##Currently restricts to one-color
+  query_geometadb(sprintf("SELECT gpl,count(gpl) as count FROM gsm
+     WHERE organism_ch1='%s'
+     AND channel_count=1
+     GROUP BY gpl
+     ORDER BY count(gpl) DESC", species))$gpl
+}
+
+
+## Functions needed later for quantile normalization
 N_ROWS_REJECTED_QC <- 0
 
 QNORM_COUNTS <- NULL
@@ -36,19 +59,19 @@ quantile_normalize <- function(m,v) {
 }
 
 postprocess_matrix <- function(m) {
-  ## TODO: fix log experiments
-  
-  #As per Mikhail's paper:
-  #floor the top 0.1% of genes (todo. do per experiment)
-  high.genes <- names(sort(colMeans(m, na.rm=TRUE), decreasing=TRUE))
-  high.genes <- high.genes[1:ceiling(length(high.genes) * 0.001)]
-  m[,high.genes] <- apply(m[,high.genes], 1, min)
-  #scale to 10000 by experiment
+  ## TODO: fix log experiments 7-16 inclusive
+    #scale to 10000 by experiment
   m <- t(apply(m,1, function(row) {
     min.val <- min(row,na.rm=T)
     max.val <- max(row,na.rm=T)
     10000 * (row - min.val) / max(1, (max.val - min.val))
   }))
+  #As per Mikhail's paper:
+  #floor the top 0.1% of genes (todo. do per experiment)
+  high.genes <- names(sort(colMeans(m, na.rm=TRUE), decreasing=TRUE))
+  high.genes <- high.genes[1:ceiling(length(high.genes) * 0.001)]
+  m[,high.genes] <- apply(m[,high.genes], 1, min)
+  
   ## Quality control criteria:
   ## 1. Mean and median >= 0
   ## 2. Mean-median ratio >= 1.2
@@ -59,8 +82,8 @@ postprocess_matrix <- function(m) {
     row.median <- median(row)
     (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (sum(row<0) <= length(row) / 100) & (length(row) > 0)
   })
+
   N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows) ##TODO: fix "NA" rows rejected due to QC
-  print(qcrows)
   return(round(m[qcrows,]))
 }
 
@@ -141,17 +164,17 @@ get_genes_for_species <- memoize(function(species) {
   system(sprintf("grep -P \"^%s\t\" data/gene_info | cut -f2", tax_id), intern=T)
 })
 
-get_outfile <- function(species,normalized=FALSE) {
-   sprintf("data/gse-%s%s.mtx",
-                     str_replace_all(tolower(species), " ", "_"),
-           ifelse(normalized, "-normalized", ""))
+get_outfile <- function(species_or_platform, normalized=FALSE) {
+  name <- ifelse(substr(species_or_platform,1,3)=="GPL", species_or_platform,
+                 tolower(species_or_platform))
+  sprintf("data/gse-%s%s.mtx",
+          str_replace_all(name, " ", "_"),
+          ifelse(normalized, "-normalized", ""))
 }
 
 GSMS_USED <- c()
-append_platform_to_matrix_file <- function(species, platform) {
-  outfile <- get_outfile(species)
-
-  genes <- get_genes_for_species(species)
+append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platform)) {
+  genes <- get_genes_for_species(get_species_for_platform(platform))
   gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="data/GEOmetadb.sqlite")[[1]]$to_acc 
   for (gseAcc in gselist[1:20]) { ##TODO:
     print(gseAcc)
@@ -178,32 +201,35 @@ append_platform_to_matrix_file <- function(species, platform) {
   }
 }
 
-get_platforms_for_species <- function(species) {
-  ##Currently restricts to one-color
-  conn <- dbConnect(SQLite(), "data/GEOmetadb.sqlite")
-  qry <- sprintf("SELECT gpl,count(gpl) as count FROM gsm
- WHERE organism_ch1='%s'
- AND channel_count=1
- GROUP BY gpl
- ORDER BY count(gpl) DESC", species)
-  sqliteQuickSQL(conn, qry)$gpl
-}
-
-write_matrix <- function(species) {
-  file.remove(get_outfile(species))
-  for (platform in get_platforms_for_species(species)[1]) { ##TODO:
-    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 10
-    print(platform)
-    append_platform_to_matrix_file(species, platform)
-  }
-  m <- read.table(get_outfile(species),sep="\t")##TODO: read in chunks
-  write(QNORM_MEANS,"qnorm_means")
+normalize <- function(outfile) {
+  m <- read.table(outfile,sep="\t")##TODO: read in chunks
   m <- quantile_normalize(m, QNORM_MEANS)
   write.table(m, file=get_outfile(species,normalized=T), sep="\t")
 }
+write_platform_matrix <- function(platform) {
+  outfile <- get_outfile(platform)
+  file.remove(outfile)
+  append_platform_to_matrix_file(platform)
+}
+write_species_matrix <- function(species) {
+  outfile <- get_outfile(species)
+  file.remove(outfile)
+  for (platform in get_platforms_for_species(species)[1]) { ##TODO:
+    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 10
+    print(platform)
+    append_platform_to_matrix_file(platform,outfile=get_outfile(species))
+  }
+}
+write_matrix <- function(species) {
+  file.remove(get_outfile(species))
+}
 
+args <- as.character(commandArgs(trailingOnly=T))
+if (tolower(substr(args,1,3))=="gpl") {
+  write_platform_matrix(args)
+} else {
+  write_species_matrix(args)
+}
 
-species <- commandArgs(trailingOnly=T)
-write_matrix(species)
 print("DONE!")
 print(paste(N_ROWS_REJECTED_QC, "rows were rejected due to failing QC."))

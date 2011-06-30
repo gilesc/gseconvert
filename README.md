@@ -27,9 +27,13 @@ other dependencies individually (see the Makefile).
 
 Now make the matrix for the species of your choice by running, e.g.: 
 
-    make matrix SPECIES="Caenorhabditis elegans"
+    make species-matrix SPECIES="Caenorhabditis elegans"
 
-being sure to surround the species of interest by quotes.
+or for the platform of your choice:
+
+    make platform-matrix PLATFORM="GPL200"
+
+being sure to surround the species/platform of interest by quotes.
 
 ## License
 

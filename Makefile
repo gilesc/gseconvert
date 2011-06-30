@@ -1,5 +1,8 @@
-matrix : 
+species-matrix : 
 	Rscript src/gseconvert.R "$(SPECIES)"
+
+platform-matrix : 
+	Rscript src/gseconvert.R "$(PLATFORM)"
 
 download-gse :
 	mkdir -p data/GSE
