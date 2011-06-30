@@ -42,7 +42,6 @@ update_quantile_normalization_vector <- function(m) {
   for (i in 1:nrow(m)) {
     v <- sort(m[i,]) ##Removes NAs also
     range <- (ncol(m)-length(v)):length(v) ##Right side of the vector
-    print(paste(ncol(m)-length(v),":",length(v)))
     QNORM_MEANS[range] <<- ((QNORM_MEANS[range] * QNORM_COUNTS[range]) + v) / (QNORM_COUNTS[range] + 1)
     QNORM_COUNTS[range] <<- QNORM_COUNTS[range] + 1
   }
@@ -59,15 +58,22 @@ quantile_normalize <- function(m,v) {
 }
 
 postprocess_matrix <- function(m) {
-  ## TODO: fix log experiments 7-16 inclusive
-    #scale to 10000 by experiment
   m <- t(apply(m,1, function(row) {
     min.val <- min(row,na.rm=T)
     max.val <- max(row,na.rm=T)
+    ## Identify experiments that are log-based and rescue them 
+    if (min.val >= 7 & max.val <= 16) {
+      row <- 2 ^ row
+      min.val <- min(row,na.rm=T)
+      max.val <- max(row,na.rm=T)
+    }
+                 
+    ##scale to 10000 by experiment
     10000 * (row - min.val) / max(1, (max.val - min.val))
   }))
+  
   #As per Mikhail's paper:
-  #floor the top 0.1% of genes (todo. do per experiment)
+  #Floor the top 0.1% of genes
   high.genes <- names(sort(colMeans(m, na.rm=TRUE), decreasing=TRUE))
   high.genes <- high.genes[1:ceiling(length(high.genes) * 0.001)]
   m[,high.genes] <- apply(m[,high.genes], 1, min)
@@ -75,12 +81,12 @@ postprocess_matrix <- function(m) {
   ## Quality control criteria:
   ## 1. Mean and median >= 0
   ## 2. Mean-median ratio >= 1.2
-  ## 3. <= 1% negative values
+  ## 3. Any negative values
   qcrows <- apply(m,1,function(row) {
     row <- row[!is.na(row)]
     row.mean <- mean(row)
     row.median <- median(row)
-    (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (sum(row<0) <= length(row) / 100) & (length(row) > 0)
+    (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (all(row>=0)) & (length(row) > 0)
   })
 
   N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows) ##TODO: fix "NA" rows rejected due to QC
@@ -176,7 +182,7 @@ GSMS_USED <- c()
 append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platform)) {
   genes <- get_genes_for_species(get_species_for_platform(platform))
   gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="data/GEOmetadb.sqlite")[[1]]$to_acc 
-  for (gseAcc in gselist[1:20]) { ##TODO:
+  for (gseAcc in gselist) {
     print(gseAcc)
     gse <- read_gse(gseAcc,platform=platform)
     if (!is.na(gse)) {
@@ -201,27 +207,27 @@ append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platfor
   }
 }
 
-normalize <- function(outfile) {
-  m <- read.table(outfile,sep="\t")##TODO: read in chunks
+normalize <- function(platform_or_species) {
+  m <- read.table(get_outfile(platform_or_species),sep="\t")##TODO: read in chunks
   m <- quantile_normalize(m, QNORM_MEANS)
-  write.table(m, file=get_outfile(species,normalized=T), sep="\t")
+  write.table(m, file=get_outfile(platform_or_species,normalized=T), sep="\t")
 }
 write_platform_matrix <- function(platform) {
   outfile <- get_outfile(platform)
   file.remove(outfile)
   append_platform_to_matrix_file(platform)
+  normalize(platform)
 }
+
 write_species_matrix <- function(species) {
   outfile <- get_outfile(species)
   file.remove(outfile)
-  for (platform in get_platforms_for_species(species)[1]) { ##TODO:
-    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 10
+  for (platform in get_platforms_for_species(species)[1:5]) {
+    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 5
     print(platform)
     append_platform_to_matrix_file(platform,outfile=get_outfile(species))
   }
-}
-write_matrix <- function(species) {
-  file.remove(get_outfile(species))
+  normalize(species)
 }
 
 args <- as.character(commandArgs(trailingOnly=T))
