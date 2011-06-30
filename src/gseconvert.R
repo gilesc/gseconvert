@@ -36,11 +36,16 @@ postprocess_matrix <- function(m) {
   return(round(m[qcrows,]))
 }
 
-geneCols <- c("ENTREZ_GENE_ID", "GeneID", "Entrez_Gene_ID", "GENE", "Gene")
+GENE_COLS <- c("ENTREZ_GENE_ID", "GeneID", "Entrez_Gene_ID", "GENE", "Gene")
 
 eset_to_matrix <- function(eSet, allGenes) {
   pd <- pData(featureData(eSet))
-  col <- geneCols[geneCols %in% names(pd)][1]
+  col <- GENE_COLS[GENE_COLS %in% names(pd)][1]
+  if (empty(pd) || is.null(col)) {
+    ##This platform is not supported
+    print("WARNING: This platform is not supported! Recovering...")
+    return(c())
+  }
   genes <- as.vector(pd[,col])
   m <- t(exprs(eSet))
   colnames(m) <- genes
@@ -63,7 +68,7 @@ eset_to_matrix <- function(eSet, allGenes) {
   #Combine normal and "abnormal" columns
   m <- cbind(m[,!(seq(1,ncol(m)) %in% cols)], subM)
   
-  #Take most active probe (simplistic approach needs to be changed in the future..)
+  #Take most active probe
   m <- m[,order(-colMeans(m))]
   m <- m[,sort(unique(colnames(m)))]
   
@@ -110,7 +115,7 @@ get_genes_for_species <- memoize(function(species) {
 
 get_outfile <- function(species) {
    sprintf("data/gse-%s.mtx",
-                     str_replace_all(species, " ", "_"))
+                     str_replace_all(tolower(species), " ", "_"))
 }
 
 append_platform_to_matrix_file <- function(species, platform) {
