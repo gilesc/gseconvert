@@ -246,8 +246,8 @@ write_platform_matrix <- function(platform) {
 write_species_matrix <- function(species) {
   outfile <- get_outfile(species)
   file.remove(outfile)
-  for (platform in get_platforms_for_species(species)[1:5]) {
-    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 5
+  for (platform in get_platforms_for_species(species)[1:10]) {
+    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 10
     print(platform)
     append_platform_to_matrix_file(platform,outfile=get_outfile(species))
   }
