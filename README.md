@@ -11,6 +11,7 @@ our papers:
 ## Requirements
 
 * R language (tested on 2.13.0), including RScript, on your PATH
+* Python 2.x, also on PATH
 * GNU Make and GNU grep (needs to support -P option)
 * ~150 GB free disk space
 

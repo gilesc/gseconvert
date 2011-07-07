@@ -186,7 +186,7 @@ GSMS_USED <- c()
 append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platform)) {
   genes <- get_genes_for_species(get_species_for_platform(platform))
   gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="data/GEOmetadb.sqlite")[[1]]$to_acc 
-  for (gseAcc in gselist[1:5]) {
+  for (gseAcc in gselist) {
     print(gseAcc)
     gse <- read_gse(gseAcc,platform=platform)
     if (!is.na(gse)) {
@@ -213,13 +213,21 @@ append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platfor
 
 normalize <- function(platform_or_species) {
   cat(paste(N_ROWS_REJECTED_QC, "experiments (GSMs) were rejected due to failing QC.\n"))
-
   path <- get_outfile(platform_or_species)
-  m <- read.table(path,sep="\t") ##TODO: read in chunks
-  m <- quantile_normalize(m, QNORM_MEANS)
-  path_normalized <- get_outfile(platform_or_species,suffix="normalized")
-  path_final <- get_outfile(platform_or_species, suffix="final")
-  write.table(m, file=path_normalized, sep="\t")
+  n_rows <- as.numeric(strsplit(system(paste("wc -l", path), intern=T), " ")[[1]][1])
+  
+  ## Quantile normalize the big matrix, a chunk at a time
+  genes <- sapply(strsplit(readLines(path,n=1), "\t")[[1]], function(x) substr(x,2,nchar(x)-1))
+  STEP_SIZE <- 2000
+  for (i in seq(1, n_rows, by=STEP_SIZE)) {
+    m <- read.table(path,sep="\t",skip=1+STEP_SIZE*(i-1), header=F, nrow=STEP_SIZE, row.names=1)
+    colnames(m) <- genes
+    m <- quantile_normalize(m, QNORM_MEANS)
+    path_normalized <- get_outfile(platform_or_species,suffix="normalized")
+    path_final <- get_outfile(platform_or_species, suffix="final")
+    write.table(m, file=path_normalized, sep="\t", append=!file.exists(path_normalized))
+  }
+
   ## Remove empty columns
   system(sprintf("python src/remove_missing.py %s > %s", path_normalized, path_final))
   unlink(path)
