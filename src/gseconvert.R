@@ -49,6 +49,7 @@ update_quantile_normalization_vector <- function(m) {
 
 quantile_normalize <- function(m,v) {
   ##Where v is the quantile normalization mean vector (QNORM_MEANS)
+  v[v==-1] <- NA
   t(apply(m,1,function(row) {
     row <- sort(row,na.last=FALSE)
     result <- v
@@ -89,7 +90,7 @@ postprocess_matrix <- function(m) {
     (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (all(row>=0)) & (length(row) > 0)
   })
 
-  N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows) ##TODO: fix "NA" rows rejected due to QC
+  N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows,na.rm=T)
   return(round(m[qcrows,]))
 }
 
@@ -136,7 +137,6 @@ eset_to_matrix <- function(eSet, allGenes) {
   colnames(result) <- allGenes
   idxs <- match(colnames(m), allGenes)
   result[,idxs] <- m
-  colnames(result) <- paste("LL:", colnames(result), sep="")
 
   #postprocess
   result <- postprocess_matrix(result)
@@ -170,19 +170,23 @@ get_genes_for_species <- memoize(function(species) {
   system(sprintf("grep -P \"^%s\t\" data/gene_info | cut -f2", tax_id), intern=T)
 })
 
-get_outfile <- function(species_or_platform, normalized=FALSE) {
+get_name <- function(species_or_platform) {
+  #Get "subname" of file
   name <- ifelse(substr(species_or_platform,1,3)=="GPL", species_or_platform,
-                 tolower(species_or_platform))
+         tolower(species_or_platform))
+  str_replace_all(name, " ", "_")
+}
+get_outfile <- function(species_or_platform, suffix=NA) {
   sprintf("data/gse-%s%s.mtx",
-          str_replace_all(name, " ", "_"),
-          ifelse(normalized, "-normalized", ""))
+          get_name(species_or_platform),
+          ifelse(is.na(suffix), "", sprintf("-%s", suffix)))
 }
 
 GSMS_USED <- c()
 append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platform)) {
   genes <- get_genes_for_species(get_species_for_platform(platform))
   gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="data/GEOmetadb.sqlite")[[1]]$to_acc 
-  for (gseAcc in gselist) {
+  for (gseAcc in gselist[1:5]) {
     print(gseAcc)
     gse <- read_gse(gseAcc,platform=platform)
     if (!is.na(gse)) {
@@ -208,15 +212,27 @@ append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platfor
 }
 
 normalize <- function(platform_or_species) {
-  m <- read.table(get_outfile(platform_or_species),sep="\t")##TODO: read in chunks
+  cat(paste(N_ROWS_REJECTED_QC, "experiments (GSMs) were rejected due to failing QC.\n"))
+
+  path <- get_outfile(platform_or_species)
+  m <- read.table(path,sep="\t") ##TODO: read in chunks
   m <- quantile_normalize(m, QNORM_MEANS)
-  write.table(m, file=get_outfile(platform_or_species,normalized=T), sep="\t")
+  path_normalized <- get_outfile(platform_or_species,suffix="normalized")
+  path_final <- get_outfile(platform_or_species, suffix="final")
+  write.table(m, file=path_normalized, sep="\t")
+  ## Remove empty columns
+  system(sprintf("python src/remove_missing.py %s > %s", path_normalized, path_final))
+  unlink(path)
+  unlink(path_normalized)
+  file.rename(path_final, path)
 }
+
 write_platform_matrix <- function(platform) {
   outfile <- get_outfile(platform)
   file.remove(outfile)
   append_platform_to_matrix_file(platform)
   normalize(platform)
+  
 }
 
 write_species_matrix <- function(species) {
@@ -237,5 +253,3 @@ if (tolower(substr(args,1,3))=="gpl") {
   write_species_matrix(args)
 }
 
-print("DONE!")
-print(paste(N_ROWS_REJECTED_QC, "rows were rejected due to failing QC."))

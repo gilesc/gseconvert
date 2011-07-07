@@ -34,6 +34,8 @@ or for the platform of your choice:
     make platform-matrix PLATFORM="GPL200"
 
 being sure to surround the species/platform of interest by quotes.
+The resulting matrices (raw and quantile normalized) will be output
+into the data/ directory.
 
 ## License
 
