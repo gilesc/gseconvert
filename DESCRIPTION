@@ -1,0 +1,10 @@
+Package: gseconvert
+Title: GSEConvert
+Version: 1.0
+Date: 2011-07-28
+Author: Cory Giles
+Maintainer: Cory Giles <cory.b.giles@gmail.com>
+Description: doit
+Imports: GEOquery, GEOmetadb, preprocessCore, stringr, memoise, plyr
+URL: http://github.com/gilesc/gseconvert
+License: GPL-2

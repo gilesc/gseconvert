@@ -6,17 +6,15 @@ library(memoise)
 library(plyr)
 
 options(warn=-1)
-
+ensure.geometadb <- function() {
+   if (!file.exists("GEOmetadb.sqlite"))
+     GEOmetadb::getSQLiteFile()
+}
 
 ## Functions for mapping among IDs
 query_geometadb <- function(qry) {
-    conn <- dbConnect(SQLite(), "data/GEOmetadb.sqlite")
-    sqliteQuickSQL(conn, qry) #TODO close
-}
-
-get_species_for_platform <- function(platform) {
-  query_geometadb(sprintf("SELECT organism from gpl
-    WHERE gpl='%s' LIMIT 1", platform))$organism
+  conn <- dbConnect(SQLite(), "GEOmetadb.sqlite")
+  sqliteQuickSQL(conn, qry) #TODO close
 }
 
 get_platforms_for_species <- function(species) {
@@ -29,23 +27,7 @@ get_platforms_for_species <- function(species) {
 }
 
 
-## Functions needed later for quantile normalization
-N_ROWS_REJECTED_QC <- 0
 
-QNORM_COUNTS <- NULL
-QNORM_MEANS <- NULL
-update_quantile_normalization_vector <- function(m) {
-  if (is.null(QNORM_COUNTS)) {
-    QNORM_COUNTS <<- rep(0,ncol(m))
-    QNORM_MEANS <<- rep(-1,ncol(m))
-  }
-  for (i in 1:nrow(m)) {
-    v <- sort(m[i,]) ##Removes NAs also
-    range <- (ncol(m)-length(v)):length(v) ##Right side of the vector
-    QNORM_MEANS[range] <<- ((QNORM_MEANS[range] * QNORM_COUNTS[range]) + v) / (QNORM_COUNTS[range] + 1)
-    QNORM_COUNTS[range] <<- QNORM_COUNTS[range] + 1
-  }
-}
 
 quantile_normalize <- function(m,v) {
   ##Where v is the quantile normalization mean vector (QNORM_MEANS)
@@ -58,7 +40,7 @@ quantile_normalize <- function(m,v) {
   }))
 }
 
-postprocess_matrix <- function(m) {
+postprocess.matrix <- function(m) {
   m <- t(apply(m,1, function(row) {
     min.val <- min(row,na.rm=T)
     max.val <- max(row,na.rm=T)
@@ -90,13 +72,12 @@ postprocess_matrix <- function(m) {
     (row.median >= 0) & (row.mean >= 0) & (row.mean / row.median >= 1.2) & (all(row>=0)) & (length(row) > 0)
   })
 
-  N_ROWS_REJECTED_QC <<- N_ROWS_REJECTED_QC + sum(!qcrows,na.rm=T)
   return(round(m[qcrows,]))
 }
 
 GENE_COLS <- c("ENTREZ_GENE_ID", "GeneID", "Entrez_Gene_ID", "GENE", "Gene")
 
-eset_to_matrix <- function(eSet, allGenes) {
+eset_to_matrix <- function(eSet) {
   pd <- pData(featureData(eSet))
   col <- GENE_COLS[GENE_COLS %in% names(pd)][1]
   if (empty(pd) || is.null(col)) {
@@ -130,23 +111,18 @@ eset_to_matrix <- function(eSet, allGenes) {
   m <- m[,order(-colMeans(m))]
   m <- m[,sort(unique(colnames(m)))]
   
-  #Put this new matrix into a bigger matrix containing a column for all genes in the species
-  m <- m[,intersect(colnames(m),allGenes)]
-  result <- matrix(nrow=nrow(m),ncol=length(allGenes))
-  rownames(result) <- rownames(m)
-  colnames(result) <- allGenes
-  idxs <- match(colnames(m), allGenes)
-  result[,idxs] <- m
-
+  #Sort columns
+  m <- m[,sort(colnames(m))]
+  
   #postprocess
-  result <- postprocess_matrix(result)
+  result <- postprocess.matrix(m)
 
   #Remove all rows that all purely NA
   result <- result[,apply(result,1,function(row) !all(is.na(row)))]
   return(result)
 }
 
-read_gse<- function(gseAcc, platform=NA, base_dir="data/GSE/") {
+read.gse<- function(gseAcc, platform=NA, base_dir="data/GSE/") {
   gse <- NA
   path <- ""
   if (!is.na(platform)) {
@@ -165,30 +141,24 @@ read_gse<- function(gseAcc, platform=NA, base_dir="data/GSE/") {
   return(gse)
 }
 
-get_genes_for_species <- memoize(function(species) {
-  tax_id <- system(sprintf("grep -P \"\t%s\t\" data/taxonomy.dat | cut -f1", species), intern=T)[1]
-  system(sprintf("grep -P \"^%s\t\" data/gene_info | cut -f2", tax_id), intern=T)
-})
 
-get_name <- function(species_or_platform) {
-  #Get "subname" of file
-  name <- ifelse(substr(species_or_platform,1,3)=="GPL", species_or_platform,
-         tolower(species_or_platform))
-  str_replace_all(name, " ", "_")
-}
-get_outfile <- function(species_or_platform, suffix=NA) {
-  sprintf("data/gse-%s%s.mtx",
-          get_name(species_or_platform),
-          ifelse(is.na(suffix), "", sprintf("-%s", suffix)))
+## Functions needed later for quantile normalization
+update_quantile_normalization_vector <- function(m) {
+
 }
 
 GSMS_USED <- c()
-append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platform)) {
-  genes <- get_genes_for_species(get_species_for_platform(platform))
-  gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="data/GEOmetadb.sqlite")[[1]]$to_acc 
+
+
+write.platform.matrix <- function(platform, outfile) {
+  ensure.geometadb()
+  
+  QNORM_COUNTS <- NULL
+  QNORM_MEANS <- NULL
+
+  gselist <- geoConvert(platform, out_type="GSE",sqlite_db_name="GEOmetadb.sqlite")[[1]]$to_acc 
   for (gseAcc in gselist) {
-    print(gseAcc)
-    gse <- read_gse(gseAcc,platform=platform)
+    gse <- read.gse(gseAcc,platform=platform)
     if (!is.na(gse)) {
       if (!is.list(gse)) {
         gse <- list(gse)
@@ -196,11 +166,21 @@ append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platfor
       for (eSet in gse) {
           if (annotation(eSet) == platform) {
             try({
-              m <- eset_to_matrix(eSet, genes)
+              m <- eset_to_matrix(eSet)
               m <- m[setdiff(rownames(m),GSMS_USED),] ##Don't reuse GSMs
               if (!empty(m)) {
                 GSMS_USED <- c(GSMS_USED,rownames(m))
-                update_quantile_normalization_vector(m)
+                #update the qunatile normalization vector
+                if (is.null(QNORM_COUNTS)) {
+                  QNORM_COUNTS <- rep(0,ncol(m))
+                  QNORM_MEANS <- rep(-1,ncol(m))
+                }
+                for (i in 1:nrow(m)) {
+                  v <- sort(m[i,]) ##Removes NAs also
+                  range <- (ncol(m)-length(v)):length(v) ##Right side of the vector
+                  QNORM_MEANS[range] <- ((QNORM_MEANS[range] * QNORM_COUNTS[range]) + v) / (QNORM_COUNTS[range] + 1)
+                  QNORM_COUNTS[range] <- QNORM_COUNTS[range] + 1
+                }
                 write.table(m, file=outfile,
                             col.names=!file.exists(outfile), append=TRUE, sep="\t")
               }
@@ -209,55 +189,37 @@ append_platform_to_matrix_file <- function(platform, outfile=get_outfile(platfor
       }
     }
   }
+  return(QNORM_MEANS)
 }
 
-normalize <- function(platform_or_species) {
-  cat(paste(N_ROWS_REJECTED_QC, "experiments (GSMs) were rejected due to failing QC.\n"))
-  path <- get_outfile(platform_or_species)
-  n_rows <- as.numeric(strsplit(system(paste("wc -l", path), intern=T), " ")[[1]][1])
+
+normalize.matrix <- function(f.in, f.out, qnorm.means) {
+  n_rows <- as.numeric(strsplit(system(paste("wc -l", f.in), intern=T), " ")[[1]][1])
   
   ## Quantile normalize the big matrix, a chunk at a time
-  genes <- sapply(strsplit(readLines(path,n=1), "\t")[[1]], function(x) substr(x,2,nchar(x)-1))
+  genes <- sapply(strsplit(readLines(f.in,n=1), "\t")[[1]], function(x) substr(x,2,nchar(x)-1))
   STEP_SIZE <- 2000
   for (i in seq(1, n_rows, by=STEP_SIZE)) {
-    m <- read.table(path,sep="\t",skip=1+STEP_SIZE*(i-1), header=F, nrow=STEP_SIZE, row.names=1)
+    m <- read.table(f.in,sep="\t",skip=1+STEP_SIZE*(i-1), header=F, nrow=STEP_SIZE, row.names=1)
     colnames(m) <- genes
-    m <- quantile_normalize(m, QNORM_MEANS)
-    path_normalized <- get_outfile(platform_or_species,suffix="normalized")
-    path_final <- get_outfile(platform_or_species, suffix="final")
-    write.table(m, file=path_normalized, sep="\t", append=!file.exists(path_normalized))
+    m <- quantile_normalize(m, qnorm.means)
+    write.table(m, file=f.out, sep="\t", append=!file.exists(f.out))
   }
 
   ## Remove empty columns
-  system(sprintf("python src/remove_missing.py %s > %s", path_normalized, path_final))
-  unlink(path)
-  unlink(path_normalized)
-  file.rename(path_final, path)
+  #system(sprintf("python src/remove_missing.py %s > %s", path_normalized, path_final))
+  #unlink(path)
+  #unlink(path_normalized)
+  #file.rename(path_final, path)
 }
 
-write_platform_matrix <- function(platform) {
-  outfile <- get_outfile(platform)
-  file.remove(outfile)
-  append_platform_to_matrix_file(platform)
-  normalize(platform)
-  
-}
 
-write_species_matrix <- function(species) {
-  outfile <- get_outfile(species)
-  file.remove(outfile)
-  for (platform in get_platforms_for_species(species)[1:10]) {
-    ##For now, the rarer platforms seem to be more trouble than they're worth, so using only the top 10
-    print(platform)
-    append_platform_to_matrix_file(platform,outfile=get_outfile(species))
-  }
-  normalize(species)
+##API
+convert.gse.files <- function(platform, outfile) {
+  tmp <- tempfile()
+  qnorm.means <- write.platform.matrix(platform, tmp)
+  normalize.matrix(tmp, outfile, qnorm.means)
 }
-
-args <- as.character(commandArgs(trailingOnly=T))
-if (tolower(substr(args,1,3))=="gpl") {
-  write_platform_matrix(args)
-} else {
-  write_species_matrix(args)
-}
-
+#write.platform.matrix(platform, outfile) <- 
+#write.species.matrix(platform, outfile)
+#-postprocess.matrix

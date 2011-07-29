@@ -1,0 +1,3 @@
+import(GEOquery, GEOmetadb, preprocessCore, stringr, memoise, plyr)
+
+export("write.platform.matrix")
